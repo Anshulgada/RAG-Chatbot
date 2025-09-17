@@ -1,0 +1,26 @@
+[project]
+name = "pdf-chatbot"
+version = "0.0.0"
+description = "A RAG chatbot using FastAPI and Llama-2."
+readme = "README.md"
+authors = [
+    { name = "Anshul Gada", email = "80207612+Anshulgada@users.noreply.github.com" },
+]
+requires-python = ">=3.10"
+
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "torch",
+    "langchain",
+    "langchain-community",
+    "pypdf",
+    "sentence-transformers",
+    "chromadb",
+    "llama-cpp-python",
+    "python-multipart",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
