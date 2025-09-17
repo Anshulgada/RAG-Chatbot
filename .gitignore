@@ -1,7 +1,20 @@
-node_modules/
+# Python virtual environment
 .venv/
+
+# Python bytecode and cache
 __pycache__/
+.mypy_cache/
 *.pyc
+
+# Python package files
 pdf_chatbot.egg-info/
 
+# Node.js dependencies
+node_modules/
+
+# Model files
 models/
+
+# Log files
+backend.log
+frontend.log
