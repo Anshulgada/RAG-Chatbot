@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import torch
@@ -9,33 +9,32 @@ from langchain.vectorstores import Chroma
 from langchain.llms import LlamaCpp
 from langchain.chains import RetrievalQA
 from contextlib import asynccontextmanager
+import os
+import tempfile
 
 class ChatRequest(BaseModel):
     message: str
 
 rag_pipeline = None
 
+llm = None
+embed_model = None
+device = 'cpu'
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global rag_pipeline
+    global llm, embed_model, device
     # Load the RAG pipeline
     device = f'cuda:{torch.cuda.current_device()}' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
 
-    # Load and process the PDF
-    loader = PyPDFLoader("Harry Potter and the Sorcerers Stone.pdf")
-    data = loader.load()
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=0)
-    all_splits = text_splitter.split_documents(data)
-
-    # Create embeddings and vector store
+    # Create embeddings
     model_name = "sentence-transformers/all-mpnet-base-v2"
     embed_model = HuggingFaceEmbeddings(
         model_name=model_name,
         model_kwargs={'device': device},
         encode_kwargs={'device': device, 'batch_size': 32}
     )
-    vectorstore = Chroma.from_documents(documents=all_splits, embedding=embed_model)
 
     # Load the language model
     llm = LlamaCpp(
@@ -46,17 +45,12 @@ async def lifespan(app: FastAPI):
         f16_kv=True,
         verbose=False,
     )
-
-    # Create the RAG pipeline
-    rag_pipeline = RetrievalQA.from_chain_type(
-        llm=llm, chain_type='stuff',
-        retriever=vectorstore.as_retriever()
-    )
-    print("RAG pipeline loaded.")
+    print("LLM and embedding model loaded.")
     yield
     # Clean up resources if needed
-    rag_pipeline = None
-    print("RAG pipeline unloaded.")
+    llm = None
+    embed_model = None
+    print("LLM and embedding model unloaded.")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -69,10 +63,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.post("/upload")
+async def upload(file: UploadFile = File(...)):
+    global rag_pipeline
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+
+        loader = PyPDFLoader(tmp_path)
+        data = loader.load()
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=0)
+        all_splits = text_splitter.split_documents(data)
+        vectorstore = Chroma.from_documents(documents=all_splits, embedding=embed_model)
+
+        rag_pipeline = RetrievalQA.from_chain_type(
+            llm=llm, chain_type='stuff',
+            retriever=vectorstore.as_retriever()
+        )
+        print(f"RAG pipeline created for {file.filename}")
+        return {"message": "File uploaded and processed successfully."}
+    except Exception as e:
+        return {"error": f"Failed to process file: {e}"}
+    finally:
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
 @app.post("/chat")
 async def chat(chat_request: ChatRequest):
     if rag_pipeline is None:
-        return {"error": "RAG pipeline is not loaded."}
+        return {"error": "Please upload a PDF first."}
     
     response = rag_pipeline(chat_request.message)
     return {"reply": response['result']}
